@@ -25,6 +25,12 @@ set -eu
 : "${JELLYFIN_MEDIA_DIR:=/data/media}"
 : "${JELLYFIN_ADMIN_USERNAME:=admin}"
 : "${JELLYFIN_ADMIN_PASSWORD:=}"
+# Jellyfin prints every JELLYFIN_-prefixed variable, values included, at startup —
+# so the administrator password would land in the deploy log on every boot. Hold
+# it as a shell variable the bootstrap can still read and drop it from the
+# environment the server inherits.
+JF_ADMIN_PW="$JELLYFIN_ADMIN_PASSWORD"
+unset JELLYFIN_ADMIN_PASSWORD
 : "${JELLYFIN_SERVER_NAME:=Jellyfin}"
 : "${JELLYFIN_BOOTSTRAP:=true}"
 : "${JELLYFIN_DEMO_MEDIA:=false}"
@@ -89,22 +95,29 @@ add_library() {
 }
 
 # Two Blender Foundation open movies, CC BY 3.0, so a fresh deployment has
-# something to play before the operator has uploaded anything. Runs only while
-# the movies folder is still empty, so it never fights a real library.
+# something to play before the operator has uploaded anything. Each file is
+# fetched only when it is missing, and the whole step stands down as soon as the
+# folder holds anything that is not one of them, so a real library is never
+# touched.
 seed_demo_media() {
   [ "$JELLYFIN_DEMO_MEDIA" = "true" ] || return 0
   dir="${JELLYFIN_MEDIA_DIR}/movies"
-  if [ -n "$(ls -A "$dir" 2>/dev/null)" ]; then
-    log "demo media skipped; ${dir} already holds files"
+  demo_names='Big Buck Bunny (2008).mp4
+Sintel (2010).mp4'
+  for existing in "$dir"/*; do
+    [ -e "$existing" ] || continue
+    printf '%s\n' "$demo_names" | grep -qxF "$(basename "$existing")" && continue
+    log "demo media skipped; ${dir} already holds a library"
     return 0
-  fi
+  done
   for spec in \
     'Big Buck Bunny (2008).mp4|https://archive.org/download/BigBuckBunny_124/Content/big_buck_bunny_720p_surround.mp4' \
     'Sintel (2010).mp4|https://archive.org/download/Sintel/sintel-2048-surround_512kb.mp4'
   do
     name=${spec%%|*}
     url=${spec#*|}
-    if curl -fsSL --retry 5 --retry-delay 5 --max-time 900 -o "${dir}/${name}.part" "$url"; then
+    [ -f "${dir}/${name}" ] && continue
+    if curl -fsSL --retry 3 --retry-delay 5 --max-time 300 -o "${dir}/${name}.part" "$url"; then
       mv "${dir}/${name}.part" "${dir}/${name}"
       log "demo media: ${name}"
     else
@@ -139,7 +152,7 @@ bootstrap() {
     return
   fi
 
-  if [ -z "$JELLYFIN_ADMIN_PASSWORD" ]; then
+  if [ -z "$JF_ADMIN_PW" ]; then
     log "JELLYFIN_ADMIN_PASSWORD is empty; leaving the setup wizard for the operator"
     return
   fi
@@ -156,7 +169,7 @@ bootstrap() {
   add_library Shows tvshows shows
   add_library Music music music
 
-  if ! api_post '' /Startup/User "$(jq -n --arg n "$JELLYFIN_ADMIN_USERNAME" --arg p "$JELLYFIN_ADMIN_PASSWORD" \
+  if ! api_post '' /Startup/User "$(jq -n --arg n "$JELLYFIN_ADMIN_USERNAME" --arg p "$JF_ADMIN_PW" \
       '{Name:$n,Password:$p}')" >/dev/null; then
     log "could not create the administrator; the setup wizard is still open at /web/#/wizardstart"
     return
@@ -172,7 +185,7 @@ bootstrap() {
     && log "setup wizard completed" \
     || { log "could not complete the setup wizard"; return; }
 
-  token=$(api_post '' /Users/AuthenticateByName "$(jq -n --arg u "$JELLYFIN_ADMIN_USERNAME" --arg p "$JELLYFIN_ADMIN_PASSWORD" \
+  token=$(api_post '' /Users/AuthenticateByName "$(jq -n --arg u "$JELLYFIN_ADMIN_USERNAME" --arg p "$JF_ADMIN_PW" \
     '{Username:$u,Pw:$p}')" | jq -r '.AccessToken // empty')
   if [ -z "$token" ]; then
     log "could not sign in as '${JELLYFIN_ADMIN_USERNAME}'; proxy and encoder settings left at defaults"
