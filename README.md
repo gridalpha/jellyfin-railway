@@ -32,6 +32,7 @@ None are required — every one has a working default.
 | `JELLYFIN_CACHE_DIR` | `/data/cache` | Image and transcode cache |
 | `JELLYFIN_TRUSTED_PROXIES` | `100.64.0.0/10,152.233.0.0/17` | Railway's container-facing CGNAT range and its public edge range |
 | `JELLYFIN_ENCODING_THREADS` | container CPU quota | Override the ffmpeg thread cap |
+| `JELLYFIN_DEMO_MEDIA` | `false` | Set to `true` to download two Creative Commons films into `movies/` while it is still empty, so playback can be confirmed before uploading a library |
 | `JELLYFIN_BOOTSTRAP` | `true` | Set to `false` to skip first-run setup entirely |
 
 ## Adding media
@@ -46,6 +47,9 @@ Then **Dashboard → Libraries → Movies → Scan Library**. `railway volume br
 opens the same volume in an interactive file browser.
 
 ## Notes
+
+- The demo films are [Big Buck Bunny](https://peach.blender.org) and
+  [Sintel](https://durian.blender.org), (c) Blender Foundation, CC BY 3.0.
 
 - Hardware transcoding is unavailable — Railway exposes no GPU or VA-API device,
   so every transcode is CPU-only. Direct play, which most clients can do for

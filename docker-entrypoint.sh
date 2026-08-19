@@ -27,6 +27,7 @@ set -eu
 : "${JELLYFIN_ADMIN_PASSWORD:=}"
 : "${JELLYFIN_SERVER_NAME:=Jellyfin}"
 : "${JELLYFIN_BOOTSTRAP:=true}"
+: "${JELLYFIN_DEMO_MEDIA:=false}"
 : "${JELLYFIN_ENCODING_THREADS:=}"
 # Railway reaches the container from CGNAT space and appends its own edge
 # address to X-Forwarded-For; both hops have to be trusted before ASP.NET will
@@ -87,6 +88,32 @@ add_library() {
   fi
 }
 
+# Two Blender Foundation open movies, CC BY 3.0, so a fresh deployment has
+# something to play before the operator has uploaded anything. Runs only while
+# the movies folder is still empty, so it never fights a real library.
+seed_demo_media() {
+  [ "$JELLYFIN_DEMO_MEDIA" = "true" ] || return 0
+  dir="${JELLYFIN_MEDIA_DIR}/movies"
+  if [ -n "$(ls -A "$dir" 2>/dev/null)" ]; then
+    log "demo media skipped; ${dir} already holds files"
+    return 0
+  fi
+  for spec in \
+    'Big Buck Bunny (2008).mp4|https://archive.org/download/BigBuckBunny_124/Content/big_buck_bunny_720p_surround.mp4' \
+    'Sintel (2010).mp4|https://archive.org/download/Sintel/sintel-2048-surround_512kb.mp4'
+  do
+    name=${spec%%|*}
+    url=${spec#*|}
+    if curl -fsSL --retry 5 --retry-delay 5 --max-time 900 -o "${dir}/${name}.part" "$url"; then
+      mv "${dir}/${name}.part" "${dir}/${name}"
+      log "demo media: ${name}"
+    else
+      rm -f "${dir}/${name}.part"
+      log "demo media: could not download ${name}"
+    fi
+  done
+}
+
 bootstrap() {
   set +e
 
@@ -103,6 +130,8 @@ bootstrap() {
     log "server never reported Healthy at ${API}/health; skipping first-run setup"
     return
   fi
+
+  seed_demo_media
 
   done_already=$(api_get '' /System/Info/Public | jq -r '.StartupWizardCompleted // false')
   if [ "$done_already" = "true" ]; then
