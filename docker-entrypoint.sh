@@ -90,14 +90,17 @@ add_library() {
 bootstrap() {
   set +e
 
+  # /health answers 200 with the body "Degraded" while Jellyfin is still starting,
+  # and every API route returns 503 until then — so wait for the body, not the
+  # status code.
   i=0
   while [ "$i" -lt 150 ]; do
-    curl -fsS --noproxy '*' "${API}/health" >/dev/null 2>&1 && break
+    [ "$(curl -fsS --noproxy '*' "${API}/health" 2>/dev/null)" = "Healthy" ] && break
     i=$((i + 1))
     sleep 2
   done
   if [ "$i" -ge 150 ]; then
-    log "server did not answer ${API}/health in 300s; skipping first-run setup"
+    log "server never reported Healthy at ${API}/health; skipping first-run setup"
     return
   fi
 
